@@ -1,0 +1,45 @@
+{
+  "name": "online-backgammon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Realtime online backgammon with virtual chips and a doubling cube. Play money only.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch src/server/index.ts",
+    "dev:client": "vite",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "vite build",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@typescript-eslint/eslint-plugin": "^8.19.1",
+    "@typescript-eslint/parser": "^8.19.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "eslint": "^8.57.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
