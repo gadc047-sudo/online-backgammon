@@ -27,6 +27,8 @@ export interface Seat {
   readonly player: Player;
   readonly chips: number;
   readonly connected: boolean;
+  /** True for the computer opponent's seat in a vs-computer table. */
+  readonly isComputer: boolean;
 }
 
 export type RoomStatus = 'waiting' | 'playing' | 'game-over';
@@ -78,6 +80,11 @@ export interface Ack<T> {
 /** Client -> Server. Every handler re-validates server-side (principle 1). */
 export interface ClientToServerEvents {
   'room:create': (
+    payload: { playerId: string; name: string; stake: number },
+    ack: (res: Ack<{ code: string }>) => void,
+  ) => void;
+  /** Instant table: a human seat plus a computer seat, no share code needed. */
+  'room:createVsComputer': (
     payload: { playerId: string; name: string; stake: number },
     ack: (res: Ack<{ code: string }>) => void,
   ) => void;

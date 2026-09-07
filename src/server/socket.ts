@@ -3,6 +3,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
 
 import type { Ack, ClientToServerEvents, ServerToClientEvents } from '../shared/protocol';
+import { createComputerDriver, type ComputerDriverOptions } from './ai/driver';
 import { RoomError, RoomRegistry, type Room } from './rooms';
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
@@ -13,7 +14,16 @@ interface Session {
   code: string;
 }
 
-export function attachSocketServer(httpServer: HttpServer, registry: RoomRegistry): TypedServer {
+export interface AttachSocketServerOptions {
+  /** Test-only override so a vs-computer game does not have to wait out real timers. */
+  readonly computerDriver?: ComputerDriverOptions;
+}
+
+export function attachSocketServer(
+  httpServer: HttpServer,
+  registry: RoomRegistry,
+  options: AttachSocketServerOptions = {},
+): TypedServer {
   const io: TypedServer = new Server(httpServer, {
     // Same-origin in production; Vite proxies /socket.io in development, so no
     // CORS allowance is needed in either case.
@@ -36,7 +46,13 @@ export function attachSocketServer(httpServer: HttpServer, registry: RoomRegistr
       const target = io.sockets.sockets.get(socketId);
       if (target) target.emit('room:snapshot', registry.snapshotFor(room, session.playerId));
     }
+    // Every broadcast is a natural checkpoint to ask "does the computer have
+    // something to do now?" — including broadcasts the computer's own last
+    // move triggered, which is how a multi-hop turn plays itself out.
+    computerDriver.poke(room.code);
   }
+
+  const computerDriver = createComputerDriver(registry, broadcast, options.computerDriver);
 
   function fail(ack: (res: Ack<never>) => void, error: unknown, context: string): void {
     if (error instanceof RoomError) {
@@ -93,6 +109,24 @@ export function attachSocketServer(httpServer: HttpServer, registry: RoomRegistr
         broadcast(room);
       } catch (error) {
         fail(ack as unknown as (res: Ack<never>) => void, error, 'room:create');
+      }
+    });
+
+    socket.on('room:createVsComputer', (payload, ack) => {
+      if (typeof ack !== 'function') return;
+      try {
+        const { playerId, name, stake } = payload ?? {};
+        if (!playerId || typeof playerId !== 'string') {
+          ack({ ok: false, error: 'Missing player id.' });
+          return;
+        }
+        const room = registry.createVsComputerRoom(playerId, String(name ?? ''), Number(stake));
+        sessions.set(socket.id, { playerId, code: room.code });
+        void socket.join(room.code);
+        ack({ ok: true, data: { code: room.code } });
+        broadcast(room);
+      } catch (error) {
+        fail(ack as unknown as (res: Ack<never>) => void, error, 'room:createVsComputer');
       }
     });
 

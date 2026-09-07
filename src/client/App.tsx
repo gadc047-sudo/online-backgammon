@@ -29,7 +29,7 @@ export default function App(): JSX.Element {
   // whatever room happened to still be in storage from last time.
   const [arrivedByLink] = useState(() => codeFromUrl() !== null);
   const [chips, setChips] = useState(getStoredChips);
-  const [busy, setBusy] = useState<'create' | 'join' | null>(null);
+  const [busy, setBusy] = useState<'create' | 'join' | 'computer' | null>(null);
 
   const nameRef = useRef(name);
   nameRef.current = name;
@@ -68,6 +68,13 @@ export default function App(): JSX.Element {
     const res = await socket.createRoom(name.trim(), stake);
     setBusy(null);
     if (!res.ok) pushError(res.error ?? 'Could not open a table.');
+  }, [name, pushError, socket, stake]);
+
+  const handlePlayComputer = useCallback(async () => {
+    setBusy('computer');
+    const res = await socket.createRoomVsComputer(name.trim(), stake);
+    setBusy(null);
+    if (!res.ok) pushError(res.error ?? 'Could not start a game against the computer.');
   }, [name, pushError, socket, stake]);
 
   const handleJoin = useCallback(async () => {
@@ -116,6 +123,7 @@ export default function App(): JSX.Element {
           busy={busy}
           online={socket.status === 'online'}
           onCreate={() => void handleCreate()}
+          onPlayComputer={() => void handlePlayComputer()}
           onJoin={() => void handleJoin()}
         />
       );

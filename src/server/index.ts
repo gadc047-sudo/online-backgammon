@@ -6,7 +6,7 @@ import express from 'express';
 import type { Server as SocketServer } from 'socket.io';
 
 import { RoomRegistry } from './rooms';
-import { attachSocketServer } from './socket';
+import { attachSocketServer, type AttachSocketServerOptions } from './socket';
 
 const REAP_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -22,7 +22,10 @@ export interface AppServer {
  * Builds the HTTP + realtime server without listening, so tests can bind an
  * ephemeral port and shut down cleanly.
  */
-export function createServer(registry: RoomRegistry = new RoomRegistry()): AppServer {
+export function createServer(
+  registry: RoomRegistry = new RoomRegistry(),
+  options: AttachSocketServerOptions = {},
+): AppServer {
   const app = express();
   app.disable('x-powered-by');
 
@@ -46,7 +49,7 @@ export function createServer(registry: RoomRegistry = new RoomRegistry()): AppSe
   }
 
   const httpServer = http.createServer(app);
-  const io = attachSocketServer(httpServer, registry);
+  const io = attachSocketServer(httpServer, registry, options);
 
   const reaper = setInterval(() => {
     const removed = registry.reap();

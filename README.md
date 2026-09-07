@@ -1,7 +1,8 @@
 # Online Backgammon
 
 Realtime online multiplayer backgammon for two players in the browser, with the doubling cube,
-gammon and backgammon multipliers, private tables behind a share code, and virtual chips.
+gammon and backgammon multipliers, private tables behind a share code, virtual chips, and a
+computer opponent for instant single-player games.
 
 **PLAY MONEY ONLY.** The chips in this game are virtual counters with no value. There is no real
 currency, no payments, no deposits, no purchases and no cash-out. See
@@ -25,6 +26,20 @@ npm run dev
 
 Vite proxies `/socket.io` and `/api` from 5173 through to the server on 3001, so the browser only
 ever needs the 5173 URL.
+
+## Play vs Computer
+
+Click **Play vs Computer** on the home screen (local: <http://localhost:5173> after `npm run dev`;
+live: the deployed URL). This seats you against a computer opponent immediately — no share code,
+no waiting for a second player, no separate "waiting for opponent" screen.
+
+The computer plays through the exact same server-side room logic and engine validation as a human
+opponent (see `src/server/ai/`): it rolls with the same CSPRNG dice, its moves are re-validated by
+the engine like anyone else's, and it can offer, take, or pass the doubling cube. Its move choice is
+a heuristic evaluation — pip count, blot exposure (shots), made points and primes, anchors, and
+bear-off progress — not a neural net or rollout engine, so it plays a solid intermediate game rather
+than a perfect one. It reacts a beat after you act (roughly half a second) so the game feels like
+it's actually taking its turn, not just recomputing everything instantly.
 
 ## Verify two-browser play
 
@@ -103,6 +118,7 @@ src/
   shared/          the wire contract between browser and server
     protocol.ts      snapshot shape, client and server event maps, constants
   server/          Express + Socket.IO, the only authority on game state
+    ai/              computer opponent: board evaluation, move/cube choice, action scheduling
   client/          React 18 + Vite single-page app
 ```
 
@@ -152,7 +168,7 @@ state wholesale rather than merging, so the server always wins on conflict.
 | Identity | Anonymous, id held in `localStorage` | No accounts, no signup, no password reset. Chips are per session. |
 | Game format | Single games, not match play | Match play would pull in the Crawford rule and match-score special cases for the cube. Out of scope, so the Crawford rule does not apply. |
 | Cube variants | None — no beaver, no raccoon | Extra cube rules, no MVP value. |
-| Opponent | Human only, no AI | Out of scope. Not built. |
+| Opponent | Human, or an instant-start computer seat | The computer is a normal seat (`isComputer` flag) driven through the same `RoomRegistry` methods a human uses, so there is no second rules or validation path. |
 
 ## Known limits
 

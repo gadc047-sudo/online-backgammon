@@ -89,7 +89,11 @@ function waitForSnapshot(
 
 beforeEach(async () => {
   // Fixed dice keep the opening roll decisive on the first try: 6 then 3.
-  server = createServer(new RoomRegistry(scriptedDice([6, 3, 5, 2, 4, 1, 3, 6, 2, 5])));
+  // computerDriver delayMs 0 keeps any vs-computer test from leaving a real
+  // 650ms timer running past the test that scheduled it.
+  server = createServer(new RoomRegistry(scriptedDice([6, 3, 5, 2, 4, 1, 3, 6, 2, 5])), {
+    computerDriver: { delayMs: 0 },
+  });
   await new Promise<void>((resolve) => server.httpServer.listen(0, '127.0.0.1', resolve));
   const address = server.httpServer.address() as AddressInfo;
   url = `http://127.0.0.1:${address.port}`;
@@ -248,4 +252,72 @@ describe('socket wiring', () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ ok: true });
   });
+});
+
+describe('vs-computer wiring', () => {
+  it('starts an instantly-playing table with a labelled computer seat', async () => {
+    const alice = await openClient();
+    const aliceSnap = waitForSnapshot(alice, (s) => s.status === 'playing');
+    const created = await emit<{ code: string }>(alice, 'room:createVsComputer', {
+      playerId: 'alice-cpu',
+      name: 'Alice',
+      stake: 25,
+    });
+    expect(created.ok).toBe(true);
+
+    const snap = await aliceSnap;
+    expect(snap.seats).toHaveLength(2);
+    expect(snap.seats.find((s) => s.isComputer)?.name).toBe('Computer');
+    expect(snap.game?.phase).toBe('opening-roll');
+  });
+
+  it(
+    'auto-plays the computer opponent end to end after the human opening roll',
+    async () => {
+      // A dedicated server with its own scripted dice, so the outcome (the
+      // computer winning the opening roll 6 to 3) is deterministic.
+      const aiServer = createServer(new RoomRegistry(scriptedDice([3, 6])), {
+        computerDriver: { delayMs: 0 },
+      });
+      await new Promise<void>((resolve) => aiServer.httpServer.listen(0, '127.0.0.1', resolve));
+      const address = aiServer.httpServer.address() as AddressInfo;
+      const aiUrl = `http://127.0.0.1:${address.port}`;
+      const alice: TestClient = connect(aiUrl, { transports: ['websocket'], forceNew: true });
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('client connect timed out')), 5000);
+          alice.on('connect', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+          alice.on('connect_error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+          });
+        });
+
+        // Attach before awaiting the acks below: the computer's cascade of
+        // broadcasts can otherwise arrive before a listener set up afterward.
+        const settledSnap = waitForSnapshot(alice, (s) => s.game?.phase === 'awaiting-roll');
+
+        await emit<{ code: string }>(alice, 'room:createVsComputer', {
+          playerId: 'alice-cpu-2',
+          name: 'Alice',
+          stake: 25,
+        });
+        await emit(alice, 'game:openingRoll');
+
+        // The computer wins the opening roll and plays its whole turn
+        // unattended; the human should see play land back in their hands.
+        const settled = await settledSnap;
+        expect(settled.game?.turn).toBe('white');
+        expect(settled.game?.movesPlayed).toEqual([]);
+      } finally {
+        alice.disconnect();
+        await aiServer.close();
+      }
+    },
+    10000,
+  );
 });

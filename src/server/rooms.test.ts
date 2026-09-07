@@ -88,6 +88,49 @@ describe('room lifecycle', () => {
   });
 });
 
+describe('vs-computer tables', () => {
+  it('creates an instantly-playing table with a labelled computer seat', () => {
+    const registry = new RoomRegistry(scriptedDice([3]));
+    const room = registry.createVsComputerRoom(ALICE, 'Alice', 25);
+
+    expect(room.seats).toHaveLength(2);
+    expect(room.seats[0]?.isComputer).toBe(false);
+    expect(room.seats[1]?.isComputer).toBe(true);
+    expect(room.seats[1]?.name).toBe('Computer');
+    expect(room.status).toBe('playing');
+    expect(room.game?.phase).toBe('opening-roll');
+  });
+
+  it('lets the computer act through the exact same registry methods as a human', () => {
+    const registry = new RoomRegistry(scriptedDice([3, 6]));
+    const room = registry.createVsComputerRoom(ALICE, 'Alice', 25);
+    const computerId = room.seats[1]?.playerId;
+    if (!computerId) throw new Error('no computer seat');
+
+    registry.openingRoll(ALICE);
+    const afterComputerRoll = registry.openingRoll(computerId);
+    expect(afterComputerRoll.game?.phase).toBe('moving');
+  });
+
+  it('tears the table down rather than parking a lone computer at "waiting"', () => {
+    const registry = new RoomRegistry(scriptedDice([3]));
+    const room = registry.createVsComputerRoom(ALICE, 'Alice', 25);
+
+    registry.leaveRoom(ALICE);
+    expect(registry.getRoom(room.code)).toBeUndefined();
+    expect(registry.findRoomForPlayer(ALICE)).toBeUndefined();
+  });
+
+  it('never counts the computer seat as a reason to keep an idle table alive', () => {
+    const registry = new RoomRegistry(scriptedDice([3]));
+    const room = registry.createVsComputerRoom(ALICE, 'Alice', 25);
+    registry.markDisconnected(ALICE);
+
+    expect(registry.reap(Date.now() + 10 * 60 * 60 * 1000)).toBe(1);
+    expect(registry.getRoom(room.code)).toBeUndefined();
+  });
+});
+
 describe('reconnection', () => {
   it('holds the seat when a socket drops rather than forfeiting', () => {
     const { registry, room } = seatedRoom();

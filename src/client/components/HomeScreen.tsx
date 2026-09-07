@@ -14,9 +14,10 @@ interface HomeScreenProps {
   readonly joinCode: string;
   readonly onJoinCodeChange: (code: string) => void;
   readonly chips: number;
-  readonly busy: 'create' | 'join' | null;
+  readonly busy: 'create' | 'join' | 'computer' | null;
   readonly online: boolean;
   readonly onCreate: () => void;
+  readonly onPlayComputer: () => void;
   readonly onJoin: () => void;
 }
 
@@ -32,6 +33,7 @@ export function HomeScreen(props: HomeScreenProps): JSX.Element {
     busy,
     online,
     onCreate,
+    onPlayComputer,
     onJoin,
   } = props;
 
@@ -62,6 +64,23 @@ export function HomeScreen(props: HomeScreenProps): JSX.Element {
           <span className="home__chips-label">chips</span>
         </span>
       </header>
+
+      <section className="card card--primary card--wide home__vs-computer">
+        <h2 className="card__title">Play vs Computer</h2>
+        <p className="card__foot">
+          Starts right away against a computer opponent — no code to share, no waiting for a
+          second player.
+        </p>
+        <button
+          type="button"
+          className="btn btn--primary btn--block"
+          disabled={!nameOk || busy !== null || !online}
+          onClick={onPlayComputer}
+        >
+          {busy === 'computer' ? <SpinnerIcon className="btn__spin" /> : null}
+          Play vs Computer
+        </button>
+      </section>
 
       <div className="home__grid">
         <form className="card card--primary" onSubmit={submitCreate}>

@@ -18,6 +18,8 @@ Online multiplayer backgammon. Responsive web only — desktop and mobile browse
   it moves the project into a regulated category.
 - **Doubling cube**, with gammon (×2) and backgammon (×3) multipliers applied to the cube value.
 - **Private rooms via share code.** Open matchmaking is not built.
+- **Play vs Computer.** An instant-start table (no share code, no waiting screen) against a
+  heuristic AI opponent — see principle 8 and `src/server/ai/`.
 
 ## Stack
 
@@ -108,6 +110,27 @@ a serverless or edge runtime** — the realtime layer cannot survive there.
 - The board is drawn from the viewing player's seat, so each player sees their own checkers
   bearing off toward them.
 
+### 8. The computer opponent is a seat, not a special case
+
+- `Seat.isComputer` and a synthetic `computer:<code>` playerId are the only things that mark a
+  seat as AI-controlled. Every action it takes — roll, move, offer/take/pass the cube, rematch —
+  goes through the exact same `RoomRegistry` methods a human's socket handler calls, so there is
+  no second, less-trusted code path to keep in sync with principle 1.
+- `src/server/ai/driver.ts` is the only thing that decides *when* the computer acts. After every
+  broadcast it asks `src/server/ai/nextAction.ts` "does the computer have something to do," and if
+  so applies it after a short delay (`DEFAULT_COMPUTER_DELAY_MS`) so the game feels like someone is
+  actually taking their turn. The delay and the scheduler are both injectable so tests never wait
+  on a real timer.
+- `src/server/ai/evaluate.ts` picks moves and cube decisions by a hand-weighted heuristic (race,
+  blot risk via `shots.ts`, made points/primes, anchors, bear-off progress) — not a rollout or a
+  neural net. It is intentionally simple enough to unit test board-by-board.
+- The computer waits for the human to roll first during the opening roll. It could roll on its
+  own the instant the table is created, but that races the human's own roll over the wire for no
+  UX benefit.
+- A table left with only a computer seat is torn down immediately (`leaveRoom`/`detach`), and the
+  computer's seat never counts toward "is anyone still here" in `reap` — otherwise an abandoned
+  vs-computer table would sit "waiting" forever, since the computer seat is always `connected`.
+
 ## Commands
 
 Verified against this repository. Node 20+ required (developed on Node 24).
@@ -152,6 +175,9 @@ src/
     rooms.ts       RoomRegistry: rooms, seats, game orchestration, chip settlement.
     dice.ts        CSPRNG dice. The only source of randomness in the project.
     codes.ts       Share-code generation on an unambiguous alphabet.
+    ai/            Computer opponent (principle 8): evaluate.ts (board scoring), shots.ts (hit-
+                   chance counting), strategy.ts (move/cube choice), nextAction.ts (pure "what
+                   should it do now"), driver.ts (schedules and applies it via RoomRegistry).
     *.test.ts      Registry tests plus an end-to-end socket test that boots a real server.
   client/      React 18 SPA.
     main.tsx       Entry point mounted by index.html.
@@ -180,7 +206,7 @@ Do not reopen these without a reason; they were settled deliberately.
 | Identity | Anonymous `playerId` in localStorage | No accounts, no auth surface. Chips are per-session and reset on restart. |
 | Match play | Single games | No match score, so the Crawford rule does not apply. |
 | Cube variants | None | No beaver, no raccoon. |
-| AI opponent | Not built | Out of scope. Do not build one unprompted. |
+| AI opponent | Built: heuristic seat, no rollouts/neural net | Explicitly requested. A normal `RoomRegistry` seat (principle 8), not a parallel rules path. |
 | Matchmaking | Not built | Private rooms by share code only. |
 
 ## Things that will bite you

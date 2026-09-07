@@ -115,6 +115,7 @@ export interface SocketApi {
   /** True while we are trying to silently restore a room from localStorage. */
   readonly resuming: boolean;
   createRoom(name: string, stake: number): Promise<Ack<{ code: string }>>;
+  createRoomVsComputer(name: string, stake: number): Promise<Ack<{ code: string }>>;
   joinRoom(name: string, code: string): Promise<Ack<{ code: string }>>;
   leaveRoom(): Promise<void>;
   send(event: SimpleEvent): Promise<void>;
@@ -253,6 +254,22 @@ export function useSocket(options: UseSocketOptions): SocketApi {
     [playerId],
   );
 
+  const createRoomVsComputer = useCallback(
+    async (name: string, stake: number): Promise<Ack<{ code: string }>> => {
+      const socket = socketRef.current;
+      if (!socket) return { ok: false, error: 'Not connected yet. One moment.' };
+      const res = await withDeadline<{ code: string }>((ack) =>
+        socket.emit('room:createVsComputer', { playerId, name, stake }, ack),
+      );
+      if (res.ok && res.data) {
+        roomCodeRef.current = res.data.code;
+        setStoredCode(res.data.code);
+      }
+      return res;
+    },
+    [playerId],
+  );
+
   const joinRoom = useCallback(
     async (name: string, code: string): Promise<Ack<{ code: string }>> => {
       const socket = socketRef.current;
@@ -316,6 +333,7 @@ export function useSocket(options: UseSocketOptions): SocketApi {
     snapshot,
     resuming,
     createRoom,
+    createRoomVsComputer,
     joinRoom,
     leaveRoom,
     send,

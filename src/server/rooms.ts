@@ -45,6 +45,12 @@ interface MutableSeat {
   player: Player;
   chips: number;
   connected: boolean;
+  isComputer: boolean;
+}
+
+/** Stable, room-scoped id for the computer seat. Never a real player id. */
+function computerPlayerId(code: string): string {
+  return `computer:${code}`;
 }
 
 export interface Room {
@@ -146,6 +152,7 @@ export class RoomRegistry {
           player: 'white',
           chips: this.chipsFor(playerId),
           connected: true,
+          isComputer: false,
         },
       ],
       game: null,
@@ -161,6 +168,65 @@ export class RoomRegistry {
     this.rooms.set(code, room);
     this.playerRooms.set(playerId, code);
     this.addLog(room, `${room.seats[0]?.name ?? 'Player'} opened the table. Stake ${room.stake} chips per point.`);
+    return room;
+  }
+
+  /**
+   * Instant table: a human seat plus a computer seat, playing immediately with
+   * no share code to hand out. The computer seat is a normal seat with a
+   * synthetic playerId, so every subsequent action it takes runs through the
+   * exact same methods below as a human's would.
+   */
+  createVsComputerRoom(playerId: string, name: string, stake: number): Room {
+    if (!playerId) throw new RoomError('Missing player id.');
+    this.detach(playerId);
+
+    let code = generateCode();
+    for (let attempts = 0; this.rooms.has(code) && attempts < 50; attempts += 1) {
+      code = generateCode();
+    }
+    if (this.rooms.has(code)) throw new RoomError('Could not allocate a table code. Try again.');
+
+    const now = Date.now();
+    const computerId = computerPlayerId(code);
+    const room: Room = {
+      code,
+      stake: sanitiseStake(stake),
+      seats: [
+        {
+          playerId,
+          name: sanitiseName(name),
+          player: 'white',
+          chips: this.chipsFor(playerId),
+          connected: true,
+          isComputer: false,
+        },
+        {
+          playerId: computerId,
+          name: 'Computer',
+          player: 'black',
+          chips: this.chipsFor(computerId),
+          connected: true,
+          isComputer: true,
+        },
+      ],
+      game: createGame(),
+      status: 'playing',
+      log: [],
+      lastResult: null,
+      rematchRequests: new Set(),
+      createdAt: now,
+      lastActivityAt: now,
+      nextLogId: 1,
+    };
+
+    this.rooms.set(code, room);
+    this.playerRooms.set(playerId, code);
+    this.playerRooms.set(computerId, code);
+    this.addLog(
+      room,
+      `${room.seats[0]?.name ?? 'Player'} started a table against the computer. Both players roll one die for the opening.`,
+    );
     return room;
   }
 
@@ -197,6 +263,7 @@ export class RoomRegistry {
       player: 'black',
       chips: this.chipsFor(playerId),
       connected: true,
+      isComputer: false,
     };
     room.seats.push(seat);
     this.playerRooms.set(playerId, code);
@@ -230,7 +297,10 @@ export class RoomRegistry {
     this.playerRooms.delete(playerId);
     if (seat) this.addLog(room, `${seat.name} left the table.`);
 
-    if (room.seats.length === 0) {
+    // A computer never rejoins on its own, so a table left with only a
+    // computer seat is as dead as one left with none.
+    if (room.seats.length === 0 || room.seats.every((s) => s.isComputer)) {
+      for (const s of room.seats) this.playerRooms.delete(s.playerId);
       this.rooms.delete(room.code);
     } else {
       // A game cannot continue one-handed; park the table back at waiting.
@@ -246,7 +316,9 @@ export class RoomRegistry {
   reap(now: number = Date.now()): number {
     let removed = 0;
     for (const [code, room] of this.rooms) {
-      const anyoneHere = room.seats.some((s) => s.connected);
+      // A computer seat is always "connected" but is never a reason to keep a
+      // table alive — only a human's presence counts.
+      const anyoneHere = room.seats.some((s) => !s.isComputer && s.connected);
       if (!anyoneHere && now - room.lastActivityAt > ROOM_IDLE_TTL_MS) {
         for (const seat of room.seats) this.playerRooms.delete(seat.playerId);
         this.rooms.delete(code);
@@ -439,6 +511,7 @@ export class RoomRegistry {
       player: s.player,
       chips: s.chips,
       connected: s.connected,
+      isComputer: s.isComputer,
     }));
 
     return {
@@ -539,7 +612,8 @@ export class RoomRegistry {
     if (!previous) return;
     previous.seats = previous.seats.filter((s) => s.playerId !== playerId);
     this.playerRooms.delete(playerId);
-    if (previous.seats.length === 0) {
+    if (previous.seats.length === 0 || previous.seats.every((s) => s.isComputer)) {
+      for (const s of previous.seats) this.playerRooms.delete(s.playerId);
       this.rooms.delete(previous.code);
     } else {
       previous.game = null;
