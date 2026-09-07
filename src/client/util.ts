@@ -48,6 +48,67 @@ export function diceFaces(game: GameState): DieFace[] {
   });
 }
 
+export interface RollSummary {
+  /** Four identical faces. The engine expands a double into four dice. */
+  readonly isDouble: boolean;
+  /** The repeated face when `isDouble`, otherwise null. */
+  readonly value: DieValue | null;
+  readonly total: number;
+  readonly remaining: number;
+  /** Terse count for the badge, e.g. "3 of 4 left". */
+  readonly countLabel: string;
+  /** One sentence covering the whole roll, for the dice group's aria-label. */
+  readonly label: string;
+}
+
+const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four'] as const;
+
+function countWord(n: number): string {
+  return COUNT_WORDS[n] ?? String(n);
+}
+
+/**
+ * What the dice actually mean this turn, derived from the faces alone so it is
+ * pure and testable. Doubles are the case worth calling out: four faces read at
+ * a glance as "some dice" rather than "four moves", so the UI needs a badge and
+ * a count, not just more pips.
+ */
+export function rollSummary(faces: readonly DieFace[]): RollSummary {
+  const first = faces[0]?.value ?? null;
+  const total = faces.length;
+  const isDouble = total === 4 && faces.every((f) => f.value === first);
+  const remaining = faces.reduce((n, f) => (f.spent ? n : n + 1), 0);
+  const countLabel =
+    remaining === 0 ? `all ${total} played` : `${remaining} of ${total} left`;
+
+  if (isDouble && first !== null) {
+    const tail =
+      remaining === 0 ? 'all four played' : `${countWord(remaining)} of four still to play`;
+    return {
+      isDouble,
+      value: first,
+      total,
+      remaining,
+      countLabel,
+      label: `Double ${first}s — four moves, ${tail}.`,
+    };
+  }
+
+  const values = faces.map((f) => f.value).join(' and ');
+  const tail =
+    remaining === 0
+      ? 'all played'
+      : `${countWord(remaining)} of ${countWord(total)} still to play`;
+  return {
+    isDouble: false,
+    value: null,
+    total,
+    remaining,
+    countLabel,
+    label: `Rolled ${values} — ${tail}.`,
+  };
+}
+
 export function winTypeLabel(winType: 'single' | 'gammon' | 'backgammon'): string {
   if (winType === 'gammon') return 'Gammon';
   if (winType === 'backgammon') return 'Backgammon';

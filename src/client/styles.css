@@ -48,6 +48,14 @@
   --danger: #e0705e;
   --warn: #e0a44a;
 
+  /* Doubles. A fourth semantic colour on purpose: accent means "legal / your
+     turn" and must keep meaning only that, and warn means "blocked". A double
+     is neither — it is a lucky roll worth four moves — so it gets its own. */
+  --gold: #ffd166;
+  --gold-ink: #2b1e05;
+  --gold-soft: rgba(255, 209, 102, 0.13);
+  --gold-line: rgba(255, 209, 102, 0.45);
+
   --radius-sm: 8px;
   --radius: 14px;
   --radius-lg: 20px;
@@ -1274,27 +1282,48 @@ ul {
 
 /* ------------------------------------------------------------------ dice -- */
 
+.dice-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  /* Stretch out of `.panel__body`'s flex-start so the doubles surface spans
+     the panel rather than hugging four dice. */
+  align-self: stretch;
+}
+
 .dice-row {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
 
+/*
+ * Every internal measurement is derived from `--die-size` rather than written
+ * as a percentage. Percentage padding on a flex item resolves against the flex
+ * CONTAINER's inline size, not the item's own, so `padding: 12%` grew with the
+ * number of dice in the row: a two-dice roll got 11px of padding and a double
+ * — twice as wide a row — got 24px, which under `border-box` left the 3x3 pip
+ * grid exactly 0px wide. Doubles rendered as four blank tiles. Size the die
+ * from one variable and the pips stay proportional at any count.
+ */
 .die {
+  --die-size: 34px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
-  gap: 8%;
-  padding: 12%;
-  width: 34px;
-  height: 34px;
-  border-radius: 22%;
+  gap: calc(var(--die-size) * 0.08);
+  padding: calc(var(--die-size) * 0.12);
+  width: var(--die-size);
+  height: var(--die-size);
+  border-radius: calc(var(--die-size) * 0.22);
   box-shadow: var(--shadow-1);
-  transition: opacity var(--t-med) var(--ease);
+  transition:
+    opacity var(--t-med) var(--ease),
+    transform var(--t-med) var(--ease);
 }
 
 .die--lg {
-  width: 44px;
-  height: 44px;
+  --die-size: 44px;
 }
 
 .die--white {
@@ -1321,9 +1350,81 @@ ul {
   background: var(--pip);
 }
 
+/* A played die stays on the tray so the roll is still countable, but it must
+   never be mistaken for one you can still use. */
 .die--spent {
-  opacity: 0.3;
-  filter: grayscale(0.6);
+  opacity: 0.34;
+  filter: grayscale(0.9);
+  transform: scale(0.86);
+}
+
+/* ---- doubles ---------------------------------------------------------- */
+
+/* A double is four moves, not two. Four identical faces do not say that on
+   their own, so the roll gets a surface, a badge and a live count. Nothing
+   here applies to a normal roll: `.dice-tray` alone is an invisible wrapper. */
+.dice-tray--double {
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gold-line);
+  background: linear-gradient(180deg, var(--gold-soft), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.dice-tray__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+}
+
+.dice-tray__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--gold);
+  color: var(--gold-ink);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dice-tray__badge-mult {
+  padding-left: 0.35rem;
+  border-left: 1px solid rgba(43, 30, 5, 0.4);
+}
+
+.dice-tray__count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--gold);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.dice-tray__count--done {
+  color: var(--ink-3);
+}
+
+.dice-tray--double .dice-row {
+  gap: 0.6rem;
+}
+
+.dice-tray--double .die--lg {
+  --die-size: 48px;
+}
+
+/* Ring only the dice still in hand: with four identical faces, dimming alone
+   leaves you counting pips to work out what is left. */
+.dice-tray--double .die:not(.die--spent) {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 1px;
 }
 
 /* ---------------------------------------------------------- control panel -- */
@@ -1379,9 +1480,7 @@ ul {
 }
 
 .panel__note .die {
-  width: 20px;
-  height: 20px;
-  padding: 14%;
+  --die-size: 20px;
 }
 
 .panel__actions {
@@ -1434,10 +1533,11 @@ ul {
   max-width: 9rem;
 }
 
+/* Holds `.die--lg`'s footprint so the opening roll does not jump when it lands. */
 .opening__blank {
   width: 44px;
   height: 44px;
-  border-radius: 22%;
+  border-radius: calc(44px * 0.22);
   border: 1px dashed var(--line-strong);
 }
 
@@ -1874,6 +1974,23 @@ ul {
 
   .toast {
     animation: bg-toast-in 180ms var(--ease) both;
+  }
+
+  /* Runs once, when the tray gains the doubles class — i.e. the moment the
+     double is rolled. Spending dice only swaps classes on the children. */
+  .dice-tray--double {
+    animation: bg-double-in 240ms var(--ease) both;
+  }
+
+  @keyframes bg-double-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   @keyframes bg-toast-in {

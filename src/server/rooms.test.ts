@@ -235,6 +235,40 @@ describe('server authority', () => {
   });
 });
 
+describe('the transcript names a double outright', () => {
+  /**
+   * Settles the opening with 6-3, plays that turn out, then hands the dice to
+   * the other player so `roll` writes a real log line for `roll` under test.
+   */
+  function logAfterRoll(roll: readonly [DieValue, DieValue]): string {
+    const { registry } = seatedRoom([6, 3, ...roll]);
+    let room = resolveOpening(registry);
+    const openerId = room.game?.turn === 'white' ? ALICE : BOB;
+    while (legalMovesNow(room.game!).length > 0) {
+      room = registry.move(openerId, legalMovesNow(room.game!)[0] as Move);
+    }
+    room = registry.endTurn(openerId);
+    const nextId = openerId === ALICE ? BOB : ALICE;
+    return registry
+      .roll(nextId)
+      .log.map((entry) => entry.text)
+      .join(' | ');
+  }
+
+  it('calls a double a double, and says it is worth four moves', () => {
+    const text = logAfterRoll([4, 4]);
+    expect(text).toContain('rolled double 4s');
+    expect(text).toContain('four moves.');
+    expect(text).not.toContain('rolled 4 and 4');
+  });
+
+  it('leaves a plain roll reading the way it always did', () => {
+    const text = logAfterRoll([5, 2]);
+    expect(text).toContain('rolled 5 and 2.');
+    expect(text).not.toContain('double');
+  });
+});
+
 describe('doubling cube and chip settlement', () => {
   it('offers, takes, and hands cube ownership to the taker', () => {
     const { registry } = seatedRoom();

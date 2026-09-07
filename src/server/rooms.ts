@@ -88,6 +88,16 @@ function describeDie(die: DieValue): string {
 }
 
 /**
+ * "rolled 3 and 3" buries the only thing that matters about a double. Say it
+ * outright, in the transcript both players read.
+ */
+function describeRoll(roll: readonly [DieValue, DieValue]): string {
+  return roll[0] === roll[1]
+    ? `double ${roll[0]}s — four moves`
+    : `${roll[0]} and ${roll[1]}`;
+}
+
+/**
  * In-memory room registry.
  *
  * CLAUDE.md principle 5: this is deliberately the whole persistence story for
@@ -370,7 +380,7 @@ export class RoomRegistry {
     const dice = this.dice.rollDice();
     const next = applyRoll(game, dice);
     room.game = next;
-    this.addLog(room, `${seat.name} rolled ${dice[0]} and ${dice[1]}.`);
+    this.addLog(room, `${seat.name} rolled ${describeRoll(dice)}.`);
 
     if (legalMovesNow(next).length === 0) {
       this.addLog(room, `${seat.name} has no legal move and must pass.`);
