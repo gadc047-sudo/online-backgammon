@@ -4,7 +4,9 @@ import { Server, type Socket } from 'socket.io';
 
 import type { Ack, ClientToServerEvents, ServerToClientEvents } from '../shared/protocol';
 import { createComputerDriver, type ComputerDriverOptions } from './ai/driver';
+import { createJevDriver, type JevDriverOptions } from './ai/jev/driver';
 import { RoomError, RoomRegistry, type Room } from './rooms';
+import { createTypeSafeClient, type TypeSafeClient } from './typesafe/client';
 
 type TypedServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type TypedSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -17,6 +19,9 @@ interface Session {
 export interface AttachSocketServerOptions {
   /** Test-only override so a vs-computer game does not have to wait out real timers. */
   readonly computerDriver?: ComputerDriverOptions;
+  readonly jevDriver?: JevDriverOptions;
+  /** Injected in tests so the Jev lane never touches the real API. */
+  readonly typeSafe?: TypeSafeClient;
 }
 
 export function attachSocketServer(
@@ -49,10 +54,17 @@ export function attachSocketServer(
     // Every broadcast is a natural checkpoint to ask "does the computer have
     // something to do now?" — including broadcasts the computer's own last
     // move triggered, which is how a multi-hop turn plays itself out.
+    //
+    // Both drivers are poked on every table. Each only ever finds its own seat
+    // (`isComputer && !isJev` versus `isJev`), so on an ordinary table the Jev
+    // driver finds nothing and on a Jev table each drives one side.
     computerDriver.poke(room.code);
+    jevDriver.poke(room.code);
   }
 
   const computerDriver = createComputerDriver(registry, broadcast, options.computerDriver);
+  const typeSafe = options.typeSafe ?? createTypeSafeClient();
+  const jevDriver = createJevDriver(registry, typeSafe, broadcast, options.jevDriver);
 
   function fail(ack: (res: Ack<never>) => void, error: unknown, context: string): void {
     if (error instanceof RoomError) {
@@ -127,6 +139,34 @@ export function attachSocketServer(
         broadcast(room);
       } catch (error) {
         fail(ack as unknown as (res: Ack<never>) => void, error, 'room:createVsComputer');
+      }
+    });
+
+    socket.on('room:createJevDemo', (payload, ack) => {
+      if (typeof ack !== 'function') return;
+      try {
+        const { playerId, name, stake } = payload ?? {};
+        if (!playerId || typeof playerId !== 'string') {
+          ack({ ok: false, error: 'Missing player id.' });
+          return;
+        }
+        // Fail here rather than opening a table that can never make a decision.
+        // A missing key is a server misconfiguration, so it is reported once,
+        // clearly, at the point the visitor asked for the lane.
+        if (!typeSafe.configured) {
+          ack({
+            ok: false,
+            error: 'Jev is not configured on this server. Set TYPESAFE_API_KEY and restart.',
+          });
+          return;
+        }
+        const room = registry.createJevDemoRoom(playerId, String(name ?? ''), Number(stake));
+        sessions.set(socket.id, { playerId, code: room.code });
+        void socket.join(room.code);
+        ack({ ok: true, data: { code: room.code } });
+        broadcast(room);
+      } catch (error) {
+        fail(ack as unknown as (res: Ack<never>) => void, error, 'room:createJevDemo');
       }
     });
 

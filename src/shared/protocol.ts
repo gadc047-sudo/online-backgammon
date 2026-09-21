@@ -27,17 +27,77 @@ export interface Seat {
   readonly player: Player;
   readonly chips: number;
   readonly connected: boolean;
-  /** True for the computer opponent's seat in a vs-computer table. */
+  /** True for any seat a driver plays rather than a person — heuristic AI or Jev. */
   readonly isComputer: boolean;
+  /**
+   * True only for the Jev seat in a `jev-demo` table. Both AI seats are
+   * `isComputer`, so this is what keeps the heuristic driver and the Jev
+   * driver from both trying to play the same seat.
+   */
+  readonly isJev: boolean;
 }
 
 export type RoomStatus = 'waiting' | 'playing' | 'game-over';
+
+/**
+ * What kind of table this is. `standard` is two humans via a share code,
+ * `vs-computer` is a human against the heuristic AI, and `jev-demo` is the
+ * spectator lane: Jev (bottom seat) against the heuristic AI, with the
+ * viewer watching and unable to act.
+ */
+export type RoomMode = 'standard' | 'vs-computer' | 'jev-demo';
+
+/** One option Jev weighed, with the probability it assigned. */
+export interface JevOption {
+  /** Stable key sent to the model as a Choice criterion, e.g. `opt3`. */
+  readonly key: string;
+  /** Structured label derived from the move or cube action. Never model prose. */
+  readonly label: string;
+  readonly probability: number;
+}
+
+export type JevDecisionKind = 'move' | 'cube-offer' | 'cube-response';
+
+/** Where the decision actually came from. `fallback` means the heuristic played it. */
+export type JevDecisionSource = 'jev' | 'fallback';
+
+/**
+ * One structured decision, rendered verbatim by the decision panel. Everything
+ * here is either a model probability or a label this codebase computed from the
+ * position — there is no natural-language explanation anywhere in the lane.
+ */
+export interface JevDecision {
+  readonly id: number;
+  readonly kind: JevDecisionKind;
+  /** Key of the option that was played. */
+  readonly choice: string;
+  /** Label of the option that was played. */
+  readonly choiceLabel: string;
+  /** 0-1 from the Choice answer. null when the heuristic decided. */
+  readonly confidence: number | null;
+  /** Every option that was offered, highest probability first. */
+  readonly options: readonly JevOption[];
+  /** How many legal plays existed before the heuristic prefilter, if any. */
+  readonly consideredOf: number;
+  readonly source: JevDecisionSource;
+  readonly at: number;
+}
+
+/** Live Jev state for the decision panel. Only present on a `jev-demo` table. */
+export interface JevStatus {
+  /** True only while a TypeSafe call is actually in flight. */
+  readonly thinking: boolean;
+  readonly last: JevDecision | null;
+  /** Last failure, cleared by the next successful decision. */
+  readonly error: string | null;
+}
 
 /** Everything a client needs to render. Sent whole on every change — never a
  *  delta, so a reconnecting client resyncs by snapshot (principle 4). */
 export interface RoomSnapshot {
   readonly code: string;
   readonly status: RoomStatus;
+  readonly mode: RoomMode;
   readonly stake: number;
   readonly seats: readonly Seat[];
   /** Which seat the recipient of this snapshot occupies. null if not seated. */
@@ -55,6 +115,8 @@ export interface RoomSnapshot {
   readonly lastResult: GameResult | null;
   /** Seats that have asked for a rematch. A new game starts when both have. */
   readonly rematchRequestedBy: readonly Player[];
+  /** Jev's decision feed. null on every table that is not a `jev-demo`. */
+  readonly jev: JevStatus | null;
 }
 
 export interface LogEntry {
@@ -85,6 +147,15 @@ export interface ClientToServerEvents {
   ) => void;
   /** Instant table: a human seat plus a computer seat, no share code needed. */
   'room:createVsComputer': (
+    payload: { playerId: string; name: string; stake: number },
+    ack: (res: Ack<{ code: string }>) => void,
+  ) => void;
+  /**
+   * Instant spectator table: Jev (bottom seat) against the heuristic computer,
+   * no share code and no seat for the caller. Acks a failure when the server
+   * has no TYPESAFE_API_KEY, rather than opening a table that cannot play.
+   */
+  'room:createJevDemo': (
     payload: { playerId: string; name: string; stake: number },
     ack: (res: Ack<{ code: string }>) => void,
   ) => void;

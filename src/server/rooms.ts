@@ -22,7 +22,16 @@ import {
   ROOM_IDLE_TTL_MS,
   STARTING_CHIPS,
 } from '../shared/protocol';
-import type { GameResult, LogEntry, RoomSnapshot, RoomStatus, Seat } from '../shared/protocol';
+import type {
+  GameResult,
+  JevDecision,
+  JevStatus,
+  LogEntry,
+  RoomMode,
+  RoomSnapshot,
+  RoomStatus,
+  Seat,
+} from '../shared/protocol';
 import { generateCode, normaliseCode } from './codes';
 import { cryptoDice } from './dice';
 import type { DiceSource } from './dice';
@@ -46,6 +55,7 @@ interface MutableSeat {
   chips: number;
   connected: boolean;
   isComputer: boolean;
+  isJev: boolean;
 }
 
 /** Stable, room-scoped id for the computer seat. Never a real player id. */
@@ -53,15 +63,37 @@ function computerPlayerId(code: string): string {
   return `computer:${code}`;
 }
 
+/** Stable, room-scoped id for the Jev seat. Never a real player id. */
+function jevPlayerId(code: string): string {
+  return `jev:${code}`;
+}
+
+function emptyJevStatus(): JevStatus {
+  return { thinking: false, last: null, error: null };
+}
+
 export interface Room {
   code: string;
+  mode: RoomMode;
   stake: number;
   seats: MutableSeat[];
+  /**
+   * Watchers with no seat. Only a `jev-demo` table has any: the viewer of that
+   * lane is deliberately not seated, which is what makes it impossible for them
+   * to move — `context()` rejects any action from someone without a seat.
+   * playerId -> currently connected.
+   */
+  spectators: Map<string, boolean>;
   game: GameState | null;
   status: RoomStatus;
   log: LogEntry[];
   lastResult: GameResult | null;
   rematchRequests: Set<Player>;
+  /** Jev's decision feed, for the panel. Untouched on non-Jev tables. */
+  jev: JevStatus;
+  /** True once Jev has been asked about the cube in the current turn. */
+  jevCubeAsked: boolean;
+  nextJevDecisionId: number;
   createdAt: number;
   lastActivityAt: number;
   nextLogId: number;
@@ -154,6 +186,7 @@ export class RoomRegistry {
     const now = Date.now();
     const room: Room = {
       code,
+      mode: 'standard',
       stake: sanitiseStake(stake),
       seats: [
         {
@@ -163,13 +196,18 @@ export class RoomRegistry {
           chips: this.chipsFor(playerId),
           connected: true,
           isComputer: false,
+          isJev: false,
         },
       ],
+      spectators: new Map(),
       game: null,
       status: 'waiting',
       log: [],
       lastResult: null,
       rematchRequests: new Set(),
+      jev: emptyJevStatus(),
+      jevCubeAsked: false,
+      nextJevDecisionId: 1,
       createdAt: now,
       lastActivityAt: now,
       nextLogId: 1,
@@ -201,6 +239,7 @@ export class RoomRegistry {
     const computerId = computerPlayerId(code);
     const room: Room = {
       code,
+      mode: 'vs-computer',
       stake: sanitiseStake(stake),
       seats: [
         {
@@ -210,6 +249,7 @@ export class RoomRegistry {
           chips: this.chipsFor(playerId),
           connected: true,
           isComputer: false,
+          isJev: false,
         },
         {
           playerId: computerId,
@@ -218,13 +258,18 @@ export class RoomRegistry {
           chips: this.chipsFor(computerId),
           connected: true,
           isComputer: true,
+          isJev: false,
         },
       ],
+      spectators: new Map(),
       game: createGame(),
       status: 'playing',
       log: [],
       lastResult: null,
       rematchRequests: new Set(),
+      jev: emptyJevStatus(),
+      jevCubeAsked: false,
+      nextJevDecisionId: 1,
       createdAt: now,
       lastActivityAt: now,
       nextLogId: 1,
@@ -238,6 +283,89 @@ export class RoomRegistry {
       `${room.seats[0]?.name ?? 'Player'} started a table against the computer. Both players roll one die for the opening.`,
     );
     return room;
+  }
+
+  /**
+   * Spectator table for the Jev demo: two driven seats, Jev on white and the
+   * heuristic computer on black, and the caller watching with no seat at all.
+   *
+   * Jev takes white deliberately. The client draws the board from the viewing
+   * player's seat and falls back to white for anyone unseated, so white is the
+   * bottom seat for a spectator — which is the locked requirement that Jev is
+   * always shown at the bottom.
+   *
+   * Seatlessness is the whole enforcement story for "the spectator cannot
+   * move": every action method goes through `context()`, which rejects a caller
+   * with no seat, so a forged socket event fails the same way a stray one does.
+   */
+  createJevDemoRoom(spectatorId: string, name: string, stake: number): Room {
+    if (!spectatorId) throw new RoomError('Missing player id.');
+    this.detach(spectatorId);
+
+    let code = generateCode();
+    for (let attempts = 0; this.rooms.has(code) && attempts < 50; attempts += 1) {
+      code = generateCode();
+    }
+    if (this.rooms.has(code)) throw new RoomError('Could not allocate a table code. Try again.');
+
+    const now = Date.now();
+    const jevId = jevPlayerId(code);
+    const computerId = computerPlayerId(code);
+    const room: Room = {
+      code,
+      mode: 'jev-demo',
+      stake: sanitiseStake(stake),
+      seats: [
+        {
+          playerId: jevId,
+          name: 'Jev',
+          player: 'white',
+          chips: this.chipsFor(jevId),
+          connected: true,
+          isComputer: true,
+          isJev: true,
+        },
+        {
+          playerId: computerId,
+          name: 'Computer',
+          player: 'black',
+          chips: this.chipsFor(computerId),
+          connected: true,
+          isComputer: true,
+          isJev: false,
+        },
+      ],
+      spectators: new Map([[spectatorId, true]]),
+      game: createGame(),
+      status: 'playing',
+      log: [],
+      lastResult: null,
+      rematchRequests: new Set(),
+      jev: emptyJevStatus(),
+      jevCubeAsked: false,
+      nextJevDecisionId: 1,
+      createdAt: now,
+      lastActivityAt: now,
+      nextLogId: 1,
+    };
+
+    this.rooms.set(code, room);
+    this.playerRooms.set(spectatorId, code);
+    this.playerRooms.set(jevId, code);
+    this.playerRooms.set(computerId, code);
+    this.addLog(
+      room,
+      `${sanitiseName(name)} is watching Jev play the computer. Both players roll one die for the opening.`,
+    );
+    return room;
+  }
+
+  /** True while at least one watcher of a spectator table still has a socket. */
+  hasConnectedSpectator(room: Room): boolean {
+    for (const connected of room.spectators.values()) {
+      if (connected) return true;
+    }
+    return false;
   }
 
   /**
@@ -264,6 +392,16 @@ export class RoomRegistry {
       return room;
     }
 
+    // A Jev table has no seat to claim, so joining it means watching it. This
+    // is also the reconnect path for a spectator whose socket dropped.
+    if (room.mode === 'jev-demo') {
+      this.detachIfElsewhere(playerId, code);
+      room.spectators.set(playerId, true);
+      this.playerRooms.set(playerId, code);
+      this.touch(room);
+      return room;
+    }
+
     if (room.seats.length >= 2) throw new RoomError('That table is full.');
 
     this.detach(playerId);
@@ -274,6 +412,7 @@ export class RoomRegistry {
       chips: this.chipsFor(playerId),
       connected: true,
       isComputer: false,
+      isJev: false,
     };
     room.seats.push(seat);
     this.playerRooms.set(playerId, code);
@@ -294,6 +433,9 @@ export class RoomRegistry {
       seat.connected = false;
       this.addLog(room, `${seat.name} disconnected. The game is held open for them.`);
     }
+    // A spectator away is what pauses a Jev table: the driver refuses to spend
+    // an API call on a game nobody is watching.
+    if (room.spectators.has(playerId)) room.spectators.set(playerId, false);
     this.touch(room);
     return room;
   }
@@ -304,16 +446,19 @@ export class RoomRegistry {
     if (!room) return undefined;
     const seat = room.seats.find((s) => s.playerId === playerId);
     room.seats = room.seats.filter((s) => s.playerId !== playerId);
+    room.spectators.delete(playerId);
     this.playerRooms.delete(playerId);
     if (seat) this.addLog(room, `${seat.name} left the table.`);
 
-    // A computer never rejoins on its own, so a table left with only a
-    // computer seat is as dead as one left with none.
-    if (room.seats.length === 0 || room.seats.every((s) => s.isComputer)) {
+    // Neither a computer nor Jev rejoins on its own, so a table left with only
+    // driven seats and nobody watching is as dead as one left with none.
+    if (this.isAbandoned(room)) {
       for (const s of room.seats) this.playerRooms.delete(s.playerId);
       this.rooms.delete(room.code);
-    } else {
-      // A game cannot continue one-handed; park the table back at waiting.
+    } else if (room.mode !== 'jev-demo') {
+      // A game cannot continue one-handed; park the table back at waiting. A
+      // Jev table is the exception: nobody who just left was playing it, so
+      // for any remaining watcher the game carries straight on.
       room.game = null;
       room.status = 'waiting';
       room.rematchRequests.clear();
@@ -326,9 +471,11 @@ export class RoomRegistry {
   reap(now: number = Date.now()): number {
     let removed = 0;
     for (const [code, room] of this.rooms) {
-      // A computer seat is always "connected" but is never a reason to keep a
-      // table alive — only a human's presence counts.
-      const anyoneHere = room.seats.some((s) => !s.isComputer && s.connected);
+      // A driven seat is always "connected" but is never a reason to keep a
+      // table alive — only a person's presence counts, whether they are seated
+      // (an ordinary table) or watching (a Jev table).
+      const anyoneHere =
+        room.seats.some((s) => !s.isComputer && s.connected) || this.hasConnectedSpectator(room);
       if (!anyoneHere && now - room.lastActivityAt > ROOM_IDLE_TTL_MS) {
         for (const seat of room.seats) this.playerRooms.delete(seat.playerId);
         this.rooms.delete(code);
@@ -380,6 +527,9 @@ export class RoomRegistry {
     const dice = this.dice.rollDice();
     const next = applyRoll(game, dice);
     room.game = next;
+    // The cube window for this turn has closed, so the next time Jev reaches
+    // `awaiting-roll` it is a new turn and a fresh cube question.
+    room.jevCubeAsked = false;
     this.addLog(room, `${seat.name} rolled ${describeRoll(dice)}.`);
 
     if (legalMovesNow(next).length === 0) {
@@ -473,6 +623,24 @@ export class RoomRegistry {
     const room = this.findRoomForPlayer(playerId);
     if (!room) throw new RoomError('You are not at a table.');
     const seat = room.seats.find((s) => s.playerId === playerId);
+
+    // A watcher of a Jev table restarts it outright rather than requesting a
+    // rematch: both seats are driven, so there is no second player whose
+    // agreement to wait for. This is also the only thing a watcher may do — it
+    // starts a game, it never touches one that is running.
+    if (!seat && room.mode === 'jev-demo' && room.spectators.has(playerId)) {
+      if (room.status !== 'game-over') throw new RoomError('The current game is still running.');
+      room.game = createGame();
+      room.status = 'playing';
+      room.lastResult = null;
+      room.rematchRequests.clear();
+      room.jev = emptyJevStatus();
+      room.jevCubeAsked = false;
+      this.addLog(room, 'New game. Both players roll one die for the opening.');
+      this.touch(room);
+      return room;
+    }
+
     if (!seat) throw new RoomError('You are not seated at this table.');
     if (room.status !== 'game-over') throw new RoomError('The current game is still running.');
     if (room.seats.length < 2) throw new RoomError('Your opponent has left the table.');
@@ -489,6 +657,48 @@ export class RoomRegistry {
     }
 
     this.touch(room);
+    return room;
+  }
+
+  // --------------------------------------------------------------- jev panel
+  //
+  // Jev's decision feed lives on the room rather than in the driver so it
+  // survives a spectator reconnect: like everything else a client renders, it
+  // arrives in the authoritative snapshot (principle 4), never as a replayed
+  // event the reconnecting socket happened to miss.
+
+  /** Flips the panel's spinner. Called immediately around a live API call. */
+  setJevThinking(code: string, thinking: boolean): Room | undefined {
+    const room = this.rooms.get(code);
+    if (!room) return undefined;
+    room.jev = { ...room.jev, thinking };
+    return room;
+  }
+
+  /**
+   * Files a completed decision. `error` is non-null when TypeSafe failed and
+   * the heuristic played instead; it stays visible until the next decision
+   * succeeds, so a one-off blip is seen rather than flashing past.
+   */
+  recordJevDecision(
+    code: string,
+    decision: Omit<JevDecision, 'id'>,
+    error: string | null,
+  ): Room | undefined {
+    const room = this.rooms.get(code);
+    if (!room) return undefined;
+    const filed: JevDecision = { ...decision, id: room.nextJevDecisionId };
+    room.nextJevDecisionId += 1;
+    room.jev = { thinking: false, last: filed, error };
+    this.addLog(room, describeJevDecision(filed));
+    this.touch(room);
+    return room;
+  }
+
+  markJevCubeAsked(code: string, asked: boolean): Room | undefined {
+    const room = this.rooms.get(code);
+    if (!room) return undefined;
+    room.jevCubeAsked = asked;
     return room;
   }
 
@@ -522,11 +732,13 @@ export class RoomRegistry {
       chips: s.chips,
       connected: s.connected,
       isComputer: s.isComputer,
+      isJev: s.isJev,
     }));
 
     return {
       code: room.code,
       status: room.status,
+      mode: room.mode,
       stake: room.stake,
       seats,
       you: seat?.player ?? null,
@@ -537,6 +749,7 @@ export class RoomRegistry {
       log: room.log,
       lastResult: room.lastResult,
       rematchRequestedBy: [...room.rematchRequests],
+      jev: room.mode === 'jev-demo' ? room.jev : null,
     };
   }
 
@@ -616,19 +829,57 @@ export class RoomRegistry {
     room.lastActivityAt = Date.now();
   }
 
+  /**
+   * A table with nobody left who could ever act on it: no seat a person holds,
+   * and no watcher. Driven seats do not count — neither a computer nor Jev
+   * rejoins on its own, so a table of only driven seats is dead.
+   */
+  private isAbandoned(room: Room): boolean {
+    if (room.seats.length === 0 && room.spectators.size === 0) return true;
+    return room.seats.every((s) => s.isComputer) && room.spectators.size === 0;
+  }
+
   /** Removes a player from whatever table they were previously at. */
   private detach(playerId: string): void {
     const previous = this.findRoomForPlayer(playerId);
     if (!previous) return;
     previous.seats = previous.seats.filter((s) => s.playerId !== playerId);
+    previous.spectators.delete(playerId);
     this.playerRooms.delete(playerId);
-    if (previous.seats.length === 0 || previous.seats.every((s) => s.isComputer)) {
+    if (this.isAbandoned(previous)) {
       for (const s of previous.seats) this.playerRooms.delete(s.playerId);
       this.rooms.delete(previous.code);
-    } else {
+    } else if (previous.mode !== 'jev-demo') {
       previous.game = null;
       previous.status = 'waiting';
       previous.rematchRequests.clear();
     }
   }
+
+  /** Detach, unless they are already where they are trying to go. */
+  private detachIfElsewhere(playerId: string, code: string): void {
+    if (this.playerRooms.get(playerId) === code) return;
+    this.detach(playerId);
+  }
+}
+
+/**
+ * The log line for a Jev decision. Assembled here from the structured fields —
+ * the option label this codebase computed and the model's own confidence — so
+ * the transcript, like the panel, carries no generated prose.
+ */
+function describeJevDecision(decision: JevDecision): string {
+  const verb =
+    decision.kind === 'move'
+      ? 'plays'
+      : decision.kind === 'cube-offer'
+        ? 'on the cube:'
+        : 'answers the double:';
+  const how =
+    decision.source === 'fallback'
+      ? 'heuristic fallback — TypeSafe unavailable'
+      : decision.confidence === null
+        ? 'forced'
+        : `confidence ${decision.confidence.toFixed(2)}`;
+  return `Jev ${verb} ${decision.choiceLabel} (${how}).`;
 }

@@ -69,7 +69,32 @@ function canReach(
   return false;
 }
 
-function canHitWithRoll(board: BoardState, hitter: Player, target: number, dice: readonly DieValue[]): boolean {
+/**
+ * The 21 distinct rolls, each already expanded (doubles to four dice) and
+ * carrying its weight out of 36. Exported so callers that need the union of
+ * hitting rolls across SEVERAL blots can walk the same 36 outcomes once —
+ * `countShots` answers for a single blot and its results cannot be added
+ * together, because one roll that hits two blots is one shot, not two.
+ */
+export const DICE_ROLLS: readonly { readonly dice: readonly DieValue[]; readonly weight: number }[] =
+  (() => {
+    const rolls: { dice: readonly DieValue[]; weight: number }[] = [];
+    for (let d1 = 1; d1 <= 6; d1 += 1) {
+      for (let d2 = d1; d2 <= 6; d2 += 1) {
+        const a = d1 as DieValue;
+        const b = d2 as DieValue;
+        rolls.push({ dice: d1 === d2 ? [a, a, a, a] : [a, b], weight: d1 === d2 ? 1 : 2 });
+      }
+    }
+    return rolls;
+  })();
+
+export function canHitWithRoll(
+  board: BoardState,
+  hitter: Player,
+  target: number,
+  dice: readonly DieValue[],
+): boolean {
   if (board.bar[hitter] > 0) {
     // Bar-first: the entering checker may itself continue toward the target...
     if (canReach(board, hitter, 'bar', target, dice)) return true;
@@ -108,14 +133,28 @@ export function countShots(board: BoardState, hitter: Player, target: number): n
   if (board.bar[hitter] === 0 && hitterPoints(board, hitter).length === 0) return 0;
 
   let shots = 0;
-  for (let d1 = 1; d1 <= 6; d1 += 1) {
-    for (let d2 = d1; d2 <= 6; d2 += 1) {
-      const dice: DieValue[] =
-        d1 === d2
-          ? [d1 as DieValue, d1 as DieValue, d1 as DieValue, d1 as DieValue]
-          : [d1 as DieValue, d2 as DieValue];
-      if (!canHitWithRoll(board, hitter, target, dice)) continue;
-      shots += d1 === d2 ? 1 : 2;
+  for (const roll of DICE_ROLLS) {
+    if (canHitWithRoll(board, hitter, target, roll.dice)) shots += roll.weight;
+  }
+  return shots;
+}
+
+/**
+ * Number of the 36 rolls that hit AT LEAST ONE of `targets`. The union, not the
+ * sum: a roll that hits two blots at once is one thing that can go wrong.
+ */
+export function countShotsAtAny(
+  board: BoardState,
+  hitter: Player,
+  targets: readonly number[],
+): number {
+  if (targets.length === 0) return 0;
+  if (board.bar[hitter] === 0 && hitterPoints(board, hitter).length === 0) return 0;
+
+  let shots = 0;
+  for (const roll of DICE_ROLLS) {
+    if (targets.some((target) => canHitWithRoll(board, hitter, target, roll.dice))) {
+      shots += roll.weight;
     }
   }
   return shots;

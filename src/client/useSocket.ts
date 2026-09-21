@@ -116,6 +116,8 @@ export interface SocketApi {
   readonly resuming: boolean;
   createRoom(name: string, stake: number): Promise<Ack<{ code: string }>>;
   createRoomVsComputer(name: string, stake: number): Promise<Ack<{ code: string }>>;
+  /** Spectator lane: Jev versus the computer, with no seat for the caller. */
+  createRoomJevDemo(name: string, stake: number): Promise<Ack<{ code: string }>>;
   joinRoom(name: string, code: string): Promise<Ack<{ code: string }>>;
   leaveRoom(): Promise<void>;
   send(event: SimpleEvent): Promise<void>;
@@ -270,6 +272,22 @@ export function useSocket(options: UseSocketOptions): SocketApi {
     [playerId],
   );
 
+  const createRoomJevDemo = useCallback(
+    async (name: string, stake: number): Promise<Ack<{ code: string }>> => {
+      const socket = socketRef.current;
+      if (!socket) return { ok: false, error: 'Not connected yet. One moment.' };
+      const res = await withDeadline<{ code: string }>((ack) =>
+        socket.emit('room:createJevDemo', { playerId, name, stake }, ack),
+      );
+      if (res.ok && res.data) {
+        roomCodeRef.current = res.data.code;
+        setStoredCode(res.data.code);
+      }
+      return res;
+    },
+    [playerId],
+  );
+
   const joinRoom = useCallback(
     async (name: string, code: string): Promise<Ack<{ code: string }>> => {
       const socket = socketRef.current;
@@ -334,6 +352,7 @@ export function useSocket(options: UseSocketOptions): SocketApi {
     resuming,
     createRoom,
     createRoomVsComputer,
+    createRoomJevDemo,
     joinRoom,
     leaveRoom,
     send,

@@ -14,10 +14,11 @@ interface HomeScreenProps {
   readonly joinCode: string;
   readonly onJoinCodeChange: (code: string) => void;
   readonly chips: number;
-  readonly busy: 'create' | 'join' | 'computer' | null;
+  readonly busy: 'create' | 'join' | 'computer' | 'jev' | null;
   readonly online: boolean;
   readonly onCreate: () => void;
   readonly onPlayComputer: () => void;
+  readonly onWatchJev: () => void;
   readonly onJoin: () => void;
 }
 
@@ -34,6 +35,7 @@ export function HomeScreen(props: HomeScreenProps): JSX.Element {
     online,
     onCreate,
     onPlayComputer,
+    onWatchJev,
     onJoin,
   } = props;
 
@@ -79,6 +81,24 @@ export function HomeScreen(props: HomeScreenProps): JSX.Element {
         >
           {busy === 'computer' ? <SpinnerIcon className="btn__spin" /> : null}
           Play vs Computer
+        </button>
+      </section>
+
+      <section className="card card--wide home__jev">
+        <h2 className="card__title">Jev vs Computer</h2>
+        <p className="card__foot">
+          Watch Jev, a TypeSafe System One model, play the computer. Every one of its decisions is
+          shown as the choice it made, the options it weighed and how confident it was. You watch;
+          you do not play.
+        </p>
+        <button
+          type="button"
+          className="btn btn--accent btn--block"
+          disabled={!nameOk || busy !== null || !online}
+          onClick={onWatchJev}
+        >
+          {busy === 'jev' ? <SpinnerIcon className="btn__spin" /> : null}
+          Jev vs Computer
         </button>
       </section>
 

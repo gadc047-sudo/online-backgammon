@@ -37,10 +37,16 @@ export function PlayerRail(props: PlayerRailProps): JSX.Element {
         <span className="rail__name">
           {seat.name}
           {isYou ? <span className="rail__you">you</span> : null}
-          {seat.isComputer ? <span className="rail__you rail__you--cpu">cpu</span> : null}
+          {seat.isJev ? (
+            <span className="rail__you rail__you--jev">jev</span>
+          ) : seat.isComputer ? (
+            <span className="rail__you rail__you--cpu">cpu</span>
+          ) : null}
         </span>
         <span className="rail__meta">
-          {seat.isComputer ? (
+          {seat.isJev ? (
+            'TypeSafe System One'
+          ) : seat.isComputer ? (
             'Computer opponent'
           ) : (
             <>

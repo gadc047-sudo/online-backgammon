@@ -41,6 +41,31 @@ bear-off progress — not a neural net or rollout engine, so it plays a solid in
 than a perfect one. It reacts a beat after you act (roughly half a second) so the game feels like
 it's actually taking its turn, not just recomputing everything instantly.
 
+## Jev vs Computer
+
+Click **Jev vs Computer** on the home screen. This opens a table where
+[Jev](https://docs.typesafe.ai), a TypeSafe System One model, plays the heuristic computer
+opponent, and you watch. There is no share code and no seat for you: the board renders from the
+watcher's viewpoint with Jev at the bottom, and every game action is refused server-side because
+you hold no seat.
+
+Jev's decisions arrive through the same `RoomRegistry` methods a human's socket handler calls, so
+they are validated by the same engine as anyone else's. What Jev actually decides is which of the
+engine's own legal plays to make: the server enumerates every legal sequence for the roll, describes
+each one as a table of computed facts (hits, blots left, rolls that hit you, points held, longest
+prime, pip counts), and asks a TypeSafe **Choice** question whose options are exactly those plays.
+Above 24 distinct plays the existing heuristic prefilters to the best 24 first. The cube is two
+further Choice questions — offer-or-roll before rolling, take-or-pass when doubled.
+
+The decision panel shows only structure: the option chosen, the confidence, and the probability
+spread across the options. There is no generated explanation anywhere in this lane, by design —
+every label on the panel was computed from the board before the question was sent.
+
+Requires `TYPESAFE_API_KEY` in the server environment. Without it the button fails with a clear
+message rather than opening a table that cannot decide anything; the other two lanes are
+unaffected. If a call times out or errors mid-game, that one decision falls back to the heuristic,
+the panel says so, and play continues — a turn never stalls waiting on the API.
+
 ## Verify two-browser play
 
 This walkthrough proves the MVP end to end. It needs two browser windows.
@@ -175,7 +200,10 @@ state wholesale rather than merging, so the server always wins on conflict.
 - Game state is in memory only. A server restart or redeploy drops every live game.
 - Single instance only. There is no shared store, so the app cannot be scaled horizontally as it is.
 - No persistence and no accounts. Chips reset when the process restarts.
-- No spectators — a table seats exactly two players.
+- No spectators, except the Jev demo lane — an ordinary table seats exactly two players and admits
+  no watchers.
+- The Jev lane costs one API call per decision and stops when nobody is watching, but there is no
+  per-table or per-account spend cap.
 - No move clock and no timeout-to-forfeit.
 
 ## Deployment
@@ -187,6 +215,7 @@ GitHub to Railway, one service, auto-deploy on push.
 - Start command: `npm start`.
 - `PORT` is injected by the platform and must be respected. The server reads `PORT` from the
   environment and falls back to `3001` locally. See `.env.example`.
+- `TYPESAFE_API_KEY` enables the Jev lane. Set it as a service variable — never in the repository.
 
 `railway.json` in the repository root holds this configuration.
 

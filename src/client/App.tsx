@@ -29,7 +29,7 @@ export default function App(): JSX.Element {
   // whatever room happened to still be in storage from last time.
   const [arrivedByLink] = useState(() => codeFromUrl() !== null);
   const [chips, setChips] = useState(getStoredChips);
-  const [busy, setBusy] = useState<'create' | 'join' | 'computer' | null>(null);
+  const [busy, setBusy] = useState<'create' | 'join' | 'computer' | 'jev' | null>(null);
 
   const nameRef = useRef(name);
   nameRef.current = name;
@@ -77,6 +77,13 @@ export default function App(): JSX.Element {
     if (!res.ok) pushError(res.error ?? 'Could not start a game against the computer.');
   }, [name, pushError, socket, stake]);
 
+  const handleWatchJev = useCallback(async () => {
+    setBusy('jev');
+    const res = await socket.createRoomJevDemo(name.trim(), stake);
+    setBusy(null);
+    if (!res.ok) pushError(res.error ?? 'Could not start the Jev demo.');
+  }, [name, pushError, socket, stake]);
+
   const handleJoin = useCallback(async () => {
     const code = normaliseCode(joinCode);
     setBusy('join');
@@ -84,6 +91,15 @@ export default function App(): JSX.Element {
     setBusy(null);
     if (!res.ok) pushError(res.error ?? `No table with the code ${code}.`);
   }, [joinCode, name, pushError, socket]);
+
+  // A failed TypeSafe call does not stop the game — the heuristic plays that
+  // decision — but it should never pass silently. The snapshot carries the last
+  // error, so reacting to the VALUE changing dedupes a repeated failure into one
+  // toast instead of one per turn.
+  const jevError = snapshot?.jev?.error ?? null;
+  useEffect(() => {
+    if (jevError) pushError(jevError);
+  }, [jevError, pushError]);
 
   const handleLeave = useCallback(async () => {
     await socket.leaveRoom();
@@ -124,6 +140,7 @@ export default function App(): JSX.Element {
           online={socket.status === 'online'}
           onCreate={() => void handleCreate()}
           onPlayComputer={() => void handlePlayComputer()}
+          onWatchJev={() => void handleWatchJev()}
           onJoin={() => void handleJoin()}
         />
       );

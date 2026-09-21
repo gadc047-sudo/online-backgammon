@@ -45,7 +45,11 @@ export function createComputerDriver(
   function poke(code: string): void {
     const room = registry.getRoom(code);
     if (!room) return;
-    const computerSeat = room.seats.find((s) => s.isComputer);
+    // `isJev` seats are driven by the Jev driver instead. Both are `isComputer`
+    // (neither is a person), so without this filter a Jev table's white seat —
+    // which comes first — would be played heuristically by this driver and by
+    // Jev at the same time.
+    const computerSeat = room.seats.find((s) => s.isComputer && !s.isJev);
     if (!computerSeat) return;
 
     const action = nextComputerAction(
@@ -53,10 +57,14 @@ export function createComputerDriver(
       computerSeat.player,
     );
     if (!action) return;
+    // A Jev table is watched, not played, so there is nobody whose rematch this
+    // would be answering — and two driven seats restarting each other would run
+    // an unbounded series. The watcher restarts that table instead.
+    if (action.type === 'rematch' && room.mode === 'jev-demo') return;
 
     scheduler(() => {
       const stillThere = registry.getRoom(code);
-      const stillComputer = stillThere?.seats.find((s) => s.isComputer);
+      const stillComputer = stillThere?.seats.find((s) => s.isComputer && !s.isJev);
       if (!stillThere || !stillComputer) return;
 
       let after: Room;

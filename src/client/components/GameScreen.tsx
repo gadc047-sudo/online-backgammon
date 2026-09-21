@@ -9,8 +9,10 @@ import { ConnectionBadge } from './ConnectionBadge';
 import { ControlPanel } from './ControlPanel';
 import { CubeOfferModal } from './CubeOfferModal';
 import { GameLog } from './GameLog';
+import { JevPanel } from './JevPanel';
 import { PlayerRail } from './PlayerRail';
 import { ResultBanner } from './ResultBanner';
+import { SpectatorPanel } from './SpectatorPanel';
 
 interface GameScreenProps {
   readonly snapshot: RoomSnapshot;
@@ -47,6 +49,12 @@ export function GameScreen(props: GameScreenProps): JSX.Element {
   const interaction = useBoardInteraction(snapshot.legalMoves, onMove);
 
   const you = snapshot.you;
+  /**
+   * A watcher has no seat, so the board falls back to white — which is exactly
+   * why the Jev seat is white: white renders at the bottom, and the locked
+   * requirement is that Jev is always the bottom seat.
+   */
+  const spectating = you === null;
   const viewer: Player = you ?? 'white';
   const opponent = otherPlayer(viewer);
   const youSeat = seatOf(snapshot, you);
@@ -57,9 +65,13 @@ export function GameScreen(props: GameScreenProps): JSX.Element {
 
   const header = (
     <header className="game__head">
-      <span className="game__code" aria-label={`Table code ${snapshot.code}`}>
-        {snapshot.code}
-      </span>
+      {snapshot.mode === 'jev-demo' ? (
+        <span className="game__code game__code--demo">Jev vs Computer</span>
+      ) : (
+        <span className="game__code" aria-label={`Table code ${snapshot.code}`}>
+          {snapshot.code}
+        </span>
+      )}
       <span className="game__stake">{snapshot.stake} chips a point</span>
       <ConnectionBadge
         status={connection}
@@ -118,6 +130,8 @@ export function GameScreen(props: GameScreenProps): JSX.Element {
                 youSeat={youSeat}
                 opponentSeat={opponentSeat}
                 rematchRequestedBy={snapshot.rematchRequestedBy}
+                canRematch={!spectating || snapshot.mode === 'jev-demo'}
+                rematchLabel={spectating ? 'Watch another game' : undefined}
                 onRematch={onRematch}
                 onLeave={onLeave}
               />
@@ -136,6 +150,16 @@ export function GameScreen(props: GameScreenProps): JSX.Element {
         </div>
 
         <aside className="game__side">
+          {snapshot.jev ? <JevPanel jev={snapshot.jev} /> : null}
+          {spectating ? (
+            <SpectatorPanel
+              snapshot={snapshot}
+              game={game}
+              bottomName={youName}
+              topName={opponentName}
+              onLeave={onLeave}
+            />
+          ) : (
           <ControlPanel
             snapshot={snapshot}
             game={game}
@@ -149,6 +173,7 @@ export function GameScreen(props: GameScreenProps): JSX.Element {
             onDouble={onDouble}
             onResign={onResign}
           />
+          )}
           <GameLog entries={snapshot.log} />
         </aside>
       </div>

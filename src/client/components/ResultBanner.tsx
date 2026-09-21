@@ -9,6 +9,10 @@ interface ResultBannerProps {
   readonly youSeat: Seat | null;
   readonly opponentSeat: Seat | null;
   readonly rematchRequestedBy: readonly Player[];
+  /** False for a watcher with nothing to restart. */
+  readonly canRematch: boolean;
+  /** Overrides the seated player's wording. A watcher is not asking anyone. */
+  readonly rematchLabel?: string | undefined;
   readonly onRematch: () => void;
   readonly onLeave: () => void;
 }
@@ -18,7 +22,18 @@ interface ResultBannerProps {
  * and are labelled as such — never a balance, never a currency.
  */
 export function ResultBanner(props: ResultBannerProps): JSX.Element {
-  const { result, game, you, youSeat, opponentSeat, rematchRequestedBy, onRematch, onLeave } = props;
+  const {
+    result,
+    game,
+    you,
+    youSeat,
+    opponentSeat,
+    rematchRequestedBy,
+    canRematch,
+    rematchLabel: rematchLabelOverride,
+    onRematch,
+    onLeave,
+  } = props;
 
   const winner = result?.winner ?? game.winner;
   const won = you !== null && winner === you;
@@ -31,11 +46,13 @@ export function ResultBanner(props: ResultBannerProps): JSX.Element {
   const youAsked = you !== null && rematchRequestedBy.includes(you);
   const oppAsked = rematchRequestedBy.some((p) => p !== you);
 
-  const rematchLabel = youAsked
-    ? 'Rematch requested — waiting for opponent'
-    : oppAsked
-      ? 'Accept rematch'
-      : 'Rematch';
+  const rematchLabel =
+    rematchLabelOverride ??
+    (youAsked
+      ? 'Rematch requested — waiting for opponent'
+      : oppAsked
+        ? 'Accept rematch'
+        : 'Rematch');
 
   return (
     <div className={cx('result', won ? 'result--won' : 'result--lost')} role="status">
@@ -88,19 +105,21 @@ export function ResultBanner(props: ResultBannerProps): JSX.Element {
         </div>
 
         <div className="result__actions">
-          <button
-            type="button"
-            className={cx('btn', oppAsked ? 'btn--accent' : 'btn--primary')}
-            disabled={youAsked}
-            onClick={onRematch}
-          >
-            {rematchLabel}
-          </button>
+          {canRematch ? (
+            <button
+              type="button"
+              className={cx('btn', oppAsked ? 'btn--accent' : 'btn--primary')}
+              disabled={youAsked}
+              onClick={onRematch}
+            >
+              {rematchLabel}
+            </button>
+          ) : null}
           <button type="button" className="btn btn--quiet" onClick={onLeave}>
             Leave table
           </button>
         </div>
-        {oppAsked && !youAsked ? (
+        {canRematch && oppAsked && !youAsked ? (
           <p className="result__hint">Your opponent is ready to go again.</p>
         ) : null}
       </div>
