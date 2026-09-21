@@ -12,6 +12,24 @@ export function seatOf(snapshot: RoomSnapshot, player: Player | null): Seat | nu
   return snapshot.seats.find((s) => s.player === player) ?? null;
 }
 
+/**
+ * The colour the board is drawn from. A seated player sees their own; anyone
+ * unseated — the watcher of a Jev table — gets white, which is the seat Jev
+ * always takes and therefore the one rendered at the bottom.
+ */
+export function viewerOf(snapshot: RoomSnapshot): Player {
+  return snapshot.you ?? 'white';
+}
+
+/**
+ * The seat on the near side of the board. Looked up by the VIEWING colour, not
+ * by `snapshot.you`: for a watcher `you` is null, and resolving the near seat
+ * from it would render Jev's occupied seat as an empty one.
+ */
+export function viewerSeatOf(snapshot: RoomSnapshot): Seat | null {
+  return seatOf(snapshot, viewerOf(snapshot));
+}
+
 export function otherPlayer(player: Player): Player {
   return player === 'white' ? 'black' : 'white';
 }

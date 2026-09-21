@@ -3,7 +3,7 @@ import type { Move, Player } from '../../engine/types';
 import type { RoomSnapshot } from '../../shared/protocol';
 import { useBoardInteraction } from '../hooks/useBoardInteraction';
 import type { ConnectionStatus } from '../useSocket';
-import { nameOf, otherPlayer, seatOf } from '../util';
+import { nameOf, otherPlayer, seatOf, viewerOf, viewerSeatOf } from '../util';
 import { Board } from './Board';
 import { ConnectionBadge } from './ConnectionBadge';
 import { ControlPanel } from './ControlPanel';
@@ -55,9 +55,11 @@ export function GameScreen(props: GameScreenProps): JSX.Element {
    * requirement is that Jev is always the bottom seat.
    */
   const spectating = you === null;
-  const viewer: Player = you ?? 'white';
+  const viewer: Player = viewerOf(snapshot);
   const opponent = otherPlayer(viewer);
-  const youSeat = seatOf(snapshot, you);
+  // By viewing colour, not by `you`: a watcher has no seat, and looking the
+  // near seat up from null would draw Jev's occupied seat as an empty one.
+  const youSeat = viewerSeatOf(snapshot);
   const opponentSeat = seatOf(snapshot, opponent);
   const youName = nameOf(youSeat, 'You');
   const opponentName = nameOf(opponentSeat, 'Your opponent');

@@ -6,8 +6,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyMove, applyRoll, createGame, legalMovesNow } from '../engine/game';
-import type { DieValue, GameState, Move } from '../engine/types';
-import { diceFaces, rollSummary } from './util';
+import type { DieValue, GameState, Move, Player } from '../engine/types';
+import type { RoomSnapshot, Seat } from '../shared/protocol';
+import { diceFaces, rollSummary, viewerOf, viewerSeatOf } from './util';
 
 /** A game sat in `moving` with `roll` on the board, white to play. */
 function rolled(roll: readonly [DieValue, DieValue]): GameState {
@@ -93,5 +94,53 @@ describe('rollSummary', () => {
     expect(roll.isDouble).toBe(false);
     expect(roll.remaining).toBe(0);
     expect(roll.total).toBe(0);
+  });
+});
+
+describe('viewerOf / viewerSeatOf', () => {
+  const seat = (player: Player, name: string, isJev = false): Seat => ({
+    playerId: `${player}-1`,
+    name,
+    player,
+    chips: 1000,
+    connected: true,
+    isComputer: isJev,
+    isJev,
+  });
+
+  const snapshot = (you: Player | null): RoomSnapshot => ({
+    code: 'ABCDE',
+    status: 'playing',
+    mode: you === null ? 'jev-demo' : 'standard',
+    stake: 25,
+    seats: [seat('white', you === null ? 'Jev' : 'Alice', you === null), seat('black', 'Computer')],
+    you,
+    game: null,
+    legalMoves: [],
+    canEndTurn: false,
+    canDouble: false,
+    log: [],
+    lastResult: null,
+    rematchRequestedBy: [],
+    jev: null,
+  });
+
+  it('draws the board from a seated player\u2019s own colour', () => {
+    expect(viewerOf(snapshot('black'))).toBe('black');
+    expect(viewerSeatOf(snapshot('black'))?.name).toBe('Computer');
+  });
+
+  it('falls back to white for a watcher, which is the seat Jev takes', () => {
+    expect(viewerOf(snapshot(null))).toBe('white');
+  });
+
+  it('resolves the watcher\u2019s near seat to Jev, not to an empty seat', () => {
+    // The regression this guards: looking the near seat up from `snapshot.you`
+    // returns null for a watcher, and the rail then renders "Empty seat"
+    // underneath a board Jev is actively playing.
+    const near = viewerSeatOf(snapshot(null));
+    expect(near).not.toBeNull();
+    expect(near?.name).toBe('Jev');
+    expect(near?.isJev).toBe(true);
   });
 });
